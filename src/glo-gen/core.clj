@@ -298,20 +298,6 @@
                            :else (go-type type-def))]
     (indent (str "type " (name type-name) " " type-def-str))))
 
-(defmethod go-gen :struct [data] ;; TODO: delete this
-  (let [props (properties data)]
-    (str "struct {\n"
-         (str/join "\n"
-                   (binding [indentation (inc indentation)]
-                     (doall (map (fn [[n t]]
-                                   (if (map? t)
-                                     (let [{:keys [type tag]} t]
-                                       (indent (str (name n) " " (go-type type) " `" (str tag) "`")))
-                                     (indent (str (name n) " " (go-type t)))))
-                                 props))))
-         "\n"
-         (indent "}"))))
-
 (defmethod go-gen :. [data]
   (let [children (children data)]
     (indent (str/join "." (map (fn [child]
@@ -425,8 +411,6 @@
                                            :IpAddress [:proto.String [:req.User.IP.String]]}}]]))
 
   (gen [:go [:sum [:index :s nil [:/ [:len :s] 2]] :c]])
-  ;; TODO: add labels
-  ;; TODO: add comments
   (println
    (gen [:package {:name "main"}
          [:import "fmt"]
@@ -434,7 +418,7 @@
                  :args [[:s [:slice :int]]
                         [:c [:chan :int]]]}
           [:%= :sum 0]
-          [:%= :c [:make [:chan :int]]]  ;; TODO: fix make function
+          [:%= :c [:make [:chan :int]]]
           [:for [:%= [:_ :v] [:range :s]]
            [:+= :sum :v]]
           [:<- :c :sum]]
@@ -446,7 +430,6 @@
           [:go [:sum [:index :s [:/ [:len :s] 2] nil] :c]]
           [:%= :x :y [:<- :c] [:<- :c]]
           [:fmt.Println :x :y [:+ :x :y]]]])) ;; TODO: add expression shorthadns
-  ;; TODO Find replacement for :%=
   (println "------\n"
    (gen [:package {:name "handler"}
          [:import
@@ -522,7 +505,7 @@
                                              :UserAgent [:proto.String [:. :r [:UserAgent]]]
                                              :EventTs [:proto.Uint64 [:uint64 [:/ [:. :ts [:UnixNano]] 1000000]]]
                                              :IpAddress [:proto.String [:req.User.IP.String]]}}]]
-          [:%= :message :err [:proto.Marshal :matchData]] ;; TODO: a, b, c := retThree() // doesn't work
+          [:%= :message :err [:proto.Marshal :matchData]]
           [:if [:!= :err nil]
            [:log.Warn "proto marshal error" [:zap.Error :err]]
            [:. [:vec.WithLabelValues "proto_marshal_err"] [:Inc]]
