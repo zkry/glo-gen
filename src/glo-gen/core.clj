@@ -1,7 +1,8 @@
 (ns glo-gen.core
   "A data-driven DSL for generateing Go code from Hiccup syntax."
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [clojure.spec.alpha :as s]))
 
 (declare go-type indent go-gen)
 
@@ -156,11 +157,22 @@
 
 (defmulti go-gen "" first :default :--default--)
 
+(s/def ::package (s/cat :statement-type keyword? :props (s/? map?) :children (s/* (s/or :child vector?
+                                                                                        :nil nil?))))
+
 (defmethod go-gen :package [params]
   (let [{:keys [name]} (properties params)
         children (children params)]
+    (println (s/valid? ::package params))
     (str "package " name "\n"
          (str/join "\n" (map go-gen children)))))
+
+(comment (go-gen [:package {:name "main"}
+                  [:func {:name "main"}
+                   [:fmt.Println "testing 123"]]])
+         (s/conform ::package [:package {:name "main"}
+                              [:func {:name "main"}
+                               [:fmt.Println "testing 123"]]]))
 
 (defmethod go-gen :func [params]
   (let [{:keys [args return reciever call] :as properties} (properties params)
