@@ -155,31 +155,32 @@
 (defmethod go-type :default [data]
   (name data))
 
-(defmulti go-gen "" first :default :--default--)
+(defn extract-tag [el]
+  (if (keyword? (first el))
+    (keyword (first (str/split (name (first el)) #"#")))
+    el))
+
+(defn extract-name [el]
+  (keyword (second (str/split (name (first el)) #"#"))))
+
+(defmulti go-gen "" extract-tag :default :--default--)
 
 (s/def ::package (s/cat :statement-type keyword? :props (s/? map?) :children (s/* (s/or :child vector?
                                                                                         :nil nil?))))
 
 (defmethod go-gen :package [params]
-  (let [{:keys [name]} (properties params)
-        children (children params)]
-    (println (s/valid? ::package params))
-    (str "package " name "\n"
+  (let [props (properties params)
+        children (children params)
+        pkg-name (or (extract-name params) (:name props))]
+    (str "package " (name pkg-name) "\n"
          (str/join "\n" (map go-gen children)))))
-
-(comment (go-gen [:package {:name "main"}
-                  [:func {:name "main"}
-                   [:fmt.Println "testing 123"]]])
-         (s/conform ::package [:package {:name "main"}
-                              [:func {:name "main"}
-                               [:fmt.Println "testing 123"]]]))
 
 (defmethod go-gen :func [params]
   (let [{:keys [args return reciever call] :as properties} (properties params)
-        func-name (:name properties)
+        func-name (or (extract-name params) (:name properties))
         children (children params)]
     (str "func " (when reciever (str "(" (name (first reciever)) " " (name (second reciever)) ") "))
-         func-name "(" (str/join ", " (map go-gen-var args)) ") " (go-gen-return return) "{\n"
+         ((fnil name "") func-name) "(" (str/join ", " (map go-gen-var args)) ") " (go-gen-return return) "{\n"
          (binding [indentation (inc indentation)]
            (str/join "\n" (map go-gen children)))
          "\n"
@@ -298,14 +299,22 @@
 
 (defmethod go-gen :var [data]
   (let [props (properties data)
-        children (children data)
-        var-name (name (first children))]
-    (indent (str "var " var-name " "
-                 (when (:type props) (name (:type props)))
-                 (when (:= props) (str "= " (str/trim (go-gen (:= props)))))))))
+        var-name (or (extract-name data) (:name props))]
+    (indent (str "var " (name var-name)
+                 (when (:type props) (str " " (name (:type props))))
+                 (when (:= props) (str " = " (str/trim (go-expr (:= props)))))))))
+
+(defmethod go-gen :const [data]
+  (let [props (properties data)
+        var-name (or (extract-name data) (:name props))]
+    (indent (str "const " (name var-name)
+                 (when (:type props) (str " " (name (:type props))))
+                 (when (:= props) (str " = " (str/trim (go-expr (:= props)))))))))
 
 (defmethod go-gen :type [data]
-  (let [[_ type-name type-def] data
+  (let [type-def (first (children data))
+        props (properties data)
+        type-name (or (extract-name data) (:name props))
         type-def-str (cond (keyword? type-def) (name type-def)
                            :else (go-type type-def))]
     (indent (str "type " (name type-name) " " type-def-str))))
@@ -391,6 +400,8 @@
   (binding [indentation 0]
     (go-gen data)))
 
+
+
 (comment
   (println (gen [:type :Publisher [:interface {:Publish {:args [[:key [:slice :byte]]
                                                                 [:msg [:slice :byte]]
@@ -401,9 +412,19 @@
   (println (gen [:%= :a [[:map :string :int] "hey" "there"]]))
   (println (gen [:%= :a nil]))
 
+  (gen [:func {:name "main"}
+        (for [[path ret] {"/go" 10
+                          "/up" 20
+                          "/seven" 7}]
+          [:a path ])
+
+        ])
+
+
+  (gen [:func#main [:fmt.Println "hey"]])
   (println (gen [:package {:name "main"}
                  [:import "fmt" "time"]
-                 [:func {:name "main"}
+                 [:func#main
                   (for [[path ret] {"/go" 10
                                     "/up" 20
                                     "/seven" 7}]
@@ -412,6 +433,14 @@
                                             [:fmt.Fprintf :w "%d" ret]]])
                   [:fmt.Println "The time is" [:time.Now]]
                   [:log.Fatal [:http.ListenAndServe ":8080" nil]]]]))
+
+  (println (gen [:package#main
+                 (for [[path ret] {"/go" 10
+                                   "/up" 20
+                                   "/seven" 7}]
+                   [:http.HandleFunc path [:func {:args [[:w :http.ResponseWriter]
+                                                         [:r :*http.Request]]}
+                                           [:fmt.Fprintf :w "%d" ret]]])]))
 
   (println (gen [:%= :a [:struct {:type :&partner.UserSync
                                   :fields {:PixelId [:proto.String :accountID]
