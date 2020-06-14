@@ -261,7 +261,7 @@
         init (:init props)
         iter (:iter props)
         condition (:cond props)
-        children (children data)
+        children (children data)  ;; TODO range
         assign-stmt? (= (ffirst children) :%=) ;; for i := range c { ... } like
         clause-str (cond (and init iter condition)
                          (str (str/trim (go-gen init)) "; " (go-expr condition) "; " (str/trim (go-gen iter)))

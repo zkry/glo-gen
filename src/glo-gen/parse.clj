@@ -45,6 +45,7 @@
     <VarDecl> = <'var'> ( VarSpec | <'('> { VarSpec } <')'>) .
     VarSpec = IdentifierList ( Type [ '=' ExpressionList ] | '=' ExpressionList) .
 
+    ShortVarDecl = IdentifierList ':=' ExpressionList .
 
     FunctionDecl = <'func'> FunctionName Signature [ FunctionBody ] .
     FunctionName = identifier .
@@ -84,9 +85,11 @@
     (* Composite Literals *)
     CompositeLit  = LiteralType LiteralValue .
     LiteralType   = StructType | ArrayType | '[' '...' ']' ElementType | SliceType | MapType | TypeName .
-    LiteralValue  = '{' [ ElementList [ ',' ] ] '}' .
-    ElementList   = KeyedElement { ',' KeyedElement } .
-    KeyedElement  = [ Key ':' ] Element .
+    LiteralValue  = <'{'> [ (ElementList | KeyedElementList) [ ',' ] ] <'}'> .
+    ElementList        = UnkeyedElement { <','> UnkeyedElement } .
+    KeyedElementList   = KeyedElement { <','> KeyedElement } .
+    KeyedElement       = Key ':' Element .
+    UnkeyedElement     = Element .
     Key           = FieldName | Expression | LiteralValue .
     FieldName     = identifier .
     Element       = Expression | LiteralValue .
@@ -117,29 +120,25 @@
                                 hex_digit hex_digit hex_digit hex_digit .
     escaped_char     = '\\\\' ( 'a' | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\\\' | \"'\" | '\"') .
 
-    (* String literals *)
-    <string_lit>       = raw_string_lit | interpreted_string_lit .
-    raw_string_lit   = '`' { unicode_char | newline } '`' .
-    <interpreted_string_lit> = <'\"'> { unicode_value | byte_value } <'\"'> .
-
 
     (* Primary Expressions *)
     PrimaryExpr =
             Operand | Conversion | MethodExpr | PrimaryExpr Selector |
             PrimaryExpr Index | PrimaryExpr Slice | PrimaryExpr TypeAssertion |
             PrimaryExpr Arguments .
-    Selector = '.' identifier .
-    Index    = '[' Expression ']' .
-    Slice    = '[' [ Expression ] ':' [ Expression ] ']' |
-               '[' [ Expression ] ':' Expression ':' Expression ']' .
-    TypeAssertion = '.' '(' Type ')' .
-    Arguments     = '(' [ ( ExpressionList | Type [ ',' ExpressionList ] ) [ '...' ] [',' ] ] ')' .
+    Selector = <'.'> identifier .
+    Index    = <'['> Expression <']'> .
+    Slice    = <'['> [ Expression ] <':'> [ Expression ] <']'> |
+               <'['> [ Expression ] <':'> Expression <':'> Expression <']'> .
+    TypeAssertion = <'.'> <'('> Type <')'> .
+    Arguments     = <'('> [ ( ExpressionList ) [ '...' ] [',' ] ] <')'> .
+
 
     (* Operands *)
     Operand     = Literal |  OperandName | '(' Expression ')' .
     <Literal>     = BasicLit | CompositeLit | FunctionLit .
     <BasicLit>    = int_lit  | float_lit | imaginary_lit | rune_lit | string_lit .
-    OperandName = identifier | QualifiedIdent .
+    <OperandName> = identifier | QualifiedIdent .
 
     (* Expression *)
     Expression = UnaryExpr | Expression binary_op Expression .
@@ -155,7 +154,7 @@
     ReceiverType = Type .
 
     (* Conversions *)
-    Conversion = Type '(' Expression [ ',' ] ')' .
+    Conversion = Type <'('> Expression [ <','> ] <')'> .
 
 
     (* Types *)
@@ -186,34 +185,90 @@
     FunctionType = 'func' Signature .
     Signature = Parameters [ Result ] .
     Result    = Parameters | Type .
-    Parameters = <'('> [ ParameterList [ ',' ] ] <')'> .
-    ParameterList = ParameterDecl { ',' ParameterDecl } .
+    Parameters = <'('> [ ParameterList [ <','> ] ] <')'> .
+    ParameterList = ParameterDecl { <','> ParameterDecl } .
     ParameterDecl = [ IdentifierList ] [ '...' ] Type .
 
     (* Interface types *)
-    InterfaceType = 'interface' '{' { ( MethodSpec | InterfaceTypeName ) <';'> } '}'
+    InterfaceType = <'interface'> <'{'> { ( MethodSpec | InterfaceTypeName ) <';'> } <'}'>
     MethodSpec    = MethodName Signature .
     MethodName    = identifier .
     InterfaceTypeName = TypeName .
 
     (* Map types *)
-    MapType = 'map' '[' KeyType ']' ElementType .
+    MapType = <'map'> <'['> KeyType <']'> ElementType .
     KeyType = Type .
 
     (* Channel types *)
     ChannelType = ( 'chan' | 'chan' '<-' | '<-' 'chan' ) ElementType .
 
     (* Blocks *)
-    Block = '{' '}' .
-    (* Qualified identifiers *)
-    QualifiedIdent = PackageName '.' identifier .
+    Block = <'{'> StatementList <'}'> .
+    StatementList = { Statement <';'>}
 
-"
+    StatementList = { Statement <';'>}
+
+    (* Statement *)
+    Statement = Declaration | LabeledStmt | SimpleStmt | GoStmt |
+                  ReturnStmt | BreakStmt | ContinueStmt | GotoStmt |
+                  FallthroughStmt | Block | IfStmt | SwitchStmt | SelectStmt |
+                  ForStmt | DeferStmt .
+    SimpleStmt = EmptyStmt | ExpressionStmt | SendStmt | IncDecStmt |
+                   Assignment | ShortVarDecl .
+    EmptyStmt = epsilon .
+    LabeledStmt = Label ':' Statement .
+    Label       = identifier .
+    ExpressionStmt = Expression .
+    SendStmt = Channel '<-' Expression .
+    Channel  = Expression .
+    IncDecStmt = Expression ( '++' | '--' ) .
+    Assignment = ExpressionList assign_op ExpressionList .
+    assign_op = [ add_op | mul_op ] '=' .
+
+    IfStmt = 'if' [ SimpleStmt ';' ] Expression Block [ 'else' ( IfStmt | Block ) ] .
+    SwitchStmt = ExprSwitchStmt | TypeSwitchStmt .
+    ExprSwitchStmt = 'switch' [ SimpleStmt ';'] [ Expression ] '{' { ExprCaseClause } '}' .
+    ExprCaseClause = ExprSwitchCase ':' StatementList .
+    ExprSwitchCase = 'case' ExpressionList | 'default' .
+
+    TypeSwitchStmt = <'switch'> [ SimpleStmt ';' ] TypeSwitchGuard <'{'> { TypeCaseClause } <'}'> .
+    TypeSwitchGuard = [ identifier <':='> ] PrimaryExpr <'.'> <'('> <'type'> <')'> .
+    TypeCaseClause = TypeSwitchCase ':' StatementList .
+    TypeSwitchCase  = 'case' TypeList | 'default'
+    TypeList = Type { ',' Type } .
+
+    ForStmt = 'for' [ Condition | ForClause | RangeClause ] Block .
+    Condition = Expression .
+
+    ForClause = [ InitStmt ] ';' [ Condition ] ';' [ PostStmt ] .
+    InitStmt = SimpleStmt .
+    PostStmt = SimpleStmt .
+
+    RangeClause = [ ExpressionList '=' | IdentifierList ':=' ] 'range' Expression .
+
+    GoStmt = 'go' Expression .
+
+    SelectStmt = <'select'> <'{'> { CommClause } <'}'> .
+    CommClause = CommCase ':' StatementList .
+    CommCase = 'case' ( RecvStmt | SendStmt ) | 'default' .
+    RecvStmt = [ ExpressionList '=' | IdentifierList ':=' ] RecvExpr .
+    RecvExpr = Expression .
+
+    ReturnStmt = <'return'> [ ExpressionList ] .
+
+    BreakStmt = 'break' [ Label ] .
+    ContinueStmt = 'continue' [ Label ] .
+    GotoStmt = 'goto' Label .
+    FallthroughStmt = 'fallthrough' .
+    DeferStmt = 'defer' Expression .
+
+    (* Qualified identifiers *)
+    QualifiedIdent = PackageName '.' identifier ."
    :auto-whitespace whitespace-or-comment))
 
 (defn add-semicolons [code]
   ;; TODO: semicolons are added into multiline string literals
-  (str/replace code #"([a-z0-9)}]|\\+\\+|--)(\n|$)" "$1;\n"))
+  (str/replace code #"([a-z0-9)}]|[+][+]|--|\")(\n|$)" "$1;\n"))
 
 (defn parse [code]
   (eval
@@ -257,9 +312,9 @@
          [:VarSpec ?vars ?type]
          [:var {:name ?vars, :type ?type}]
 
-         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params] [ :Result ?res  ] ] [ :FunctionBody ?body ] ]
+         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params] [ :Result [:Parameters ?res]  ] ] [ :FunctionBody ?body ] ]
          [:func {:name ?name, :return ?res, :args ?params} ?body]
-         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters] [ :Result ?res  ] ] [ :FunctionBody ?body ] ]
+         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters] [ :Result [:Parameters ?res]  ] ] [ :FunctionBody ?body ] ]
          [:func {:name ?name, :return ?res, } ?body]
          [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params]] [ :FunctionBody ?body ] ]
          [:func {:name ?name, :args ?params} ?body]
@@ -301,12 +356,237 @@
          ?decl
 
          [:FieldDecl ?name ?type]
-         [?name ?type]))))
-    (golang (add-semicolons code)))))
+         [?name ?type]
+
+         #_(* Expressions *)
+
+         [:Expression ?left [:binary_op [_ ?op]] ?right]
+         [(keyword ?op) ?left ?right]
+
+         [:UnaryExpr [:unary_op ?op] ?x]
+         [(keyword ?op) ?x]
+
+         [:UnaryExpr ?x]
+         ?x
+
+         [:Operand ?x]
+         ?x
+
+         [:PrimaryExpr ?x]
+         ?x
+
+         [:Expression ?x]
+         ?x
+
+         #_(* Statements *)
+
+         [:Block [:StatementList . !stmt ...]]
+         [. !stmt ...] ;; TODO: this returns a list in a list, shuold be just list
+
+         [:Block [. !stmts ...]]
+         [. !stmts ...]
+
+         [:ShortVarDecl ?var ":=" ?expr]
+         [:%= ?var ?expr]
+
+         [:PrimaryExpr ?expr [:Arguments . !args ...]]
+         [?expr . !args ...]
+
+         [:PrimaryExpr ?expr [:TypeAssertion ?type]]
+         [:as-type ?type ?expr]
+
+         [:PrimaryExpr ?expr [:Slice . !idxs ...]]
+         [:index ?expr . !idxs ...]
+
+         [:PrimaryExpr ?expr [:Index ?idx]]
+         [:index ?expr ?idx]
+
+         [:PrimaryExpr ?expr [:Selector ?id]]
+         [(keyword (str "." ?id)) ?expr]
+
+         [[:MethodExpr [:ReceiverType ?recv] "." [:MethodName ?method]] . !args ...]
+         [(keyword (str (name ?recv) "." (name ?method))) . !args ...]
+
+         [:ExpressionStmt ?expr]
+         ?expr
+
+         [:IfStmt "if" ?expr ?body]
+         [:if ?expr ?body]
+
+         [:IfStmt "if" ?assign ";" ?expr ?body]
+         [:if {:%= ?assign
+               :cond ?expr} ?body]
+
+         [:IncDecStmt ?var ?op]
+         [(keyword ?op) ?var]
+
+         [:Statement ?stmt]
+         ?stmt
+
+         [:SimpleStmt ?stmt]
+         ?stmt
+
+         [:ForClause ?init-stmt ";" ?condition ";" ?post-stmt]
+         {:init ?init-stmt, :cond ?condition, :iter ?post-stmt}
+         [:RangeClause "range" ?expr]
+         {:range ?expr}
+         [:RangeClause ?expr-list "=" "range" ?expr]
+         {:= [?expr-list [:range ?expr]]} ;; TODO: Test me
+         [:RangeClause ?id-list ":=" "range" ?expr]
+         {:%= [?id-list [:range ?expr]]}
+
+         [:ForStmt "for" ?for-info ?body]
+         [:for ?for-info ?body]
+
+         [:KeyedElement [:Key ?key] ":" ?elem]
+         [?key ?elem]
+         [:UnkeyedElement ?elem]
+         ?elem
+         [:Element ?elem]
+         ?elem
+         [:CompositeLit [:LiteralType ?type] [:LiteralValue [:KeyedElementList . !elems ...]]]
+         [:map {:type ?type
+                :fields (into {} [. !elems ...])}]
+
+         [:CompositeLit [:LiteralType ?type] [:LiteralValue [:ElementList . !elems ...]]]
+         [:slice {:type ?type, :elements [. !elems ...]}]
+         [:CompositeLit [:LiteralType ?type]]
+         [?type]
+         [:MapType ?key-type ?val-type]
+         [:map ?key-type ?val-type]
+         [:KeyType ?type]
+         ?type
+
+         [:ReturnStmt ?items]
+         (let [items ?items]
+           (into [] (concat [:return] (if (vector? items) items (vector items)))))
+
+         [:ReturnStmt]
+         [:return]
+
+         [:DeferStmt "defer" ?expr]
+         [:defer ?expr]
+
+         [:FallthroughStmt]
+         [:fallthrough]
+
+         [:GotoStmt "goto" ?label]
+         [:goto ?label]
+
+         [:ContinueStmt "continue" ?label]
+         [:continue ?label]
+         [:ContinueStmt "continue"]
+         [:continue]
+
+         [:BreakStmt "break" ?label]
+         [:break ?label]
+         [:BreakStmt "break"]
+         [:break]
+
+         [:SelectStmt . !clauses ...]
+         [:select . !clauses ...]
+
+         [:CommClause ?case ":" [:StatementList . !stmt ...]]
+         [:case ?case . !stmt ...]
+
+         [:SendStmt [:Channel ?chan] "<-" ?expr]
+         [:<- ?chan ?expr]
+         [:RecvExpr ?expr]
+         ?expr
+         [:RecvStmt ?stmt]
+         ?stmt
+
+         [:CommCase "default"]
+         [:default]
+         [:CommCase "case" ?x]
+         ?x
+
+         [:Assignment ?vars ?op ?expr]
+         [?op ?vars ?expr]
+
+         [:assign_op . !items ...]
+         (keyword (str . !items ...))
+         [:add_op ?op]
+         ?op
+         [:mul_op ?op]
+         ?op
+
+         [:ParameterDecl ?name ?type]
+         [?name ?type]
+
+         [:ParameterDecl ?name]
+         ?name
+
+         [:GoStmt "go" ?expr]
+         [:go ?expr]
+
+         :InterfaceType
+         :interface
+
+         [:ParameterList . !params ...]
+         [. !params ...]
+
+         [:TypeSwitchCase "case" ?type]
+         ?type
+         [:TypeSwitchCase "default"]
+         :default
+
+         [:TypeList . !types ...]
+         (let [types [. !types ...]]
+           (if (= 1 (count types))
+             (first types)
+             types))
+
+         [:TypeSwitchGuard ?id ?expr]
+         [:%= ?id [:type ?expr]]
+         [:TypeSwitchGuard ?type]
+         ?type
+
+         [:TypeSwitchStmt ?stmt ";" ?guard . !clauses ...]
+         [:switch {:pre ?stmt ;; TODO this is new
+                   :guard ?guard}
+          . !clauses ...]
+         [:TypeSwitchStmt ?guard . !clauses ...]
+         [:switch ?guard
+          . !clauses ...]
+
+         [:StatementList . !stmts ...]
+         [. !stmts ...]
+
+         [:TypeCaseClause ?type ":" [. !stmts ...]]
+         [:case ?type . !stmts ...]
+
+         [:SwitchStmt ?stmt]
+         ?stmt
+
+         [:Conversion ?type ?expr]
+         [?type ?expr]
+
+         [:func ?props [. !children ...]]
+         [:func ?props . !children ...]
+         [:func [. !children ...]]
+         [:func . !children ...]
+
+         [:QualifiedIdent [:PackageName ?pkg-name] "." ?id]
+         (keyword (str (name ?pkg-name) "." (name ?id)))
+
+         ))))
+    (golang (add-semicolons code)))
+))
 
 (defn propogate-type [& consts]
   (let [type (first (filter identity (map #(-> % second :type) consts)))]
     (into [] (map #(assoc-in % [1 :type] type) consts))))
+
+(comment
+  (parse "package main
+var i, j int = 1, 2
+
+func main() {
+	var c, python, java = true, false, \"no!\"
+	fmt.Println(i, j, c, python, java)
+}"))
+
 
 (def parsed-data (parse "package main
 /* comment */
@@ -348,8 +628,6 @@ func Funny() int {
 "))
 
 
-
-
 (comment
   (def country-data {"United States" {"iso" "US"}})
 
@@ -360,3 +638,5 @@ func Funny() int {
     {:matches (m/scan {_ {"name" ?name, "countrycode" ?countrycode}})
      :country-data {?countryname {"iso" ?countrycode}}}
     [?name ?countryname]))
+
+(re-find #"\p{L}+" "%")
