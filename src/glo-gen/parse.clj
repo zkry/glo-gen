@@ -29,20 +29,20 @@
     PackageName = identifier .
     <ImportPath> = string_lit .
 
-    TopLevelDecl = Declaration | FunctionDecl | MethodDecl .
+    <TopLevelDecl> = Declaration | FunctionDecl | MethodDecl .
     <Declaration>  = ConstDecl | TypeDecl | VarDecl .
 
-    ConstDecl    = <'const'> ( ConstSpec | <'('> { ConstSpec <';'> } <')'> ) .
+    <ConstDecl>    = <'const'> ( ConstSpec | <'('> { ConstSpec <';'> } <')'> ) .
     ConstSpec    = IdentifierList [ [ Type ] '=' ExpressionList ] .
     IdentifierList = identifier { <','> identifier } .
     identifier             = #'\\p{L}(\\p{L}|[0-9])*' .
-    ExpressionList = Expression { <','> Expression } .
+    <ExpressionList> = Expression { <','> Expression } .
 
     <TypeDecl> = <'type'> ( TypeSpec | '(' { TypeSpec } ')' ) .
     <TypeSpec> = AliasDecl | TypeDef .
     AliasDecl = identifier <'='> Type .
 
-    <VarDecl> = <'var'> ( VarSpec | <'('> { VarSpec } <')'>) .
+    <VarDecl> = <'var'> ( VarSpec | <'('> { VarSpec <';'> } <')'>) .
     VarSpec = IdentifierList ( Type [ '=' ExpressionList ] | '=' ExpressionList) .
 
     ShortVarDecl = IdentifierList ':=' ExpressionList .
@@ -85,7 +85,7 @@
     (* Composite Literals *)
     CompositeLit  = LiteralType LiteralValue .
     LiteralType   = StructType | ArrayType | '[' '...' ']' ElementType | SliceType | MapType | TypeName .
-    LiteralValue  = <'{'> [ (ElementList | KeyedElementList) [ ',' ] ] <'}'> .
+    LiteralValue  = <'{'> [ (ElementList | KeyedElementList) [ <','> ] ] <'}'> .
     ElementList        = UnkeyedElement { <','> UnkeyedElement } .
     KeyedElementList   = KeyedElement { <','> KeyedElement } .
     KeyedElement       = Key ':' Element .
@@ -131,7 +131,7 @@
     Slice    = <'['> [ Expression ] <':'> [ Expression ] <']'> |
                <'['> [ Expression ] <':'> Expression <':'> Expression <']'> .
     TypeAssertion = <'.'> <'('> Type <')'> .
-    Arguments     = <'('> [ ( ExpressionList ) [ '...' ] [',' ] ] <')'> .
+    Arguments     = <'('> [ ( ExpressionList ) [ '...' ] [<','> ] ] <')'> .
 
 
     (* Operands *)
@@ -144,7 +144,7 @@
     Expression = UnaryExpr | Expression binary_op Expression .
     UnaryExpr  = PrimaryExpr | unary_op UnaryExpr .
     binary_op  = '||' | '&&' | rel_op | add_op | mul_op .
-    rel_op     = '==' | '!=' | '<' | '<=' | '>' | '>=' .
+    <rel_op>     = '==' | '!=' | '<' | '<=' | '>' | '>=' .
     add_op     = '+' | '-' | '|' | '^' .
     mul_op     = '*' | '/' | '%' | '<<' | '>>' | '&' | '&^' .
     unary_op   = '+' | '-' | '!' | '^' | '*' | '&' | '<-' .
@@ -203,10 +203,8 @@
     ChannelType = ( 'chan' | 'chan' '<-' | '<-' 'chan' ) ElementType .
 
     (* Blocks *)
-    Block = <'{'> StatementList <'}'> .
-    StatementList = { Statement <';'>}
-
-    StatementList = { Statement <';'>}
+    <Block> = <'{'> StatementList <'}'> .
+    <StatementList> = { Statement <';'>} .
 
     (* Statement *)
     Statement = Declaration | LabeledStmt | SimpleStmt | GoStmt |
@@ -235,14 +233,14 @@
     TypeSwitchGuard = [ identifier <':='> ] PrimaryExpr <'.'> <'('> <'type'> <')'> .
     TypeCaseClause = TypeSwitchCase ':' StatementList .
     TypeSwitchCase  = 'case' TypeList | 'default'
-    TypeList = Type { ',' Type } .
+    TypeList = Type { <','> Type } .
 
     ForStmt = 'for' [ Condition | ForClause | RangeClause ] Block .
-    Condition = Expression .
+    <Condition> = Expression .
 
     ForClause = [ InitStmt ] ';' [ Condition ] ';' [ PostStmt ] .
-    InitStmt = SimpleStmt .
-    PostStmt = SimpleStmt .
+    <InitStmt> = SimpleStmt .
+    <PostStmt> = SimpleStmt .
 
     RangeClause = [ ExpressionList '=' | IdentifierList ':=' ] 'range' Expression .
 
@@ -268,7 +266,7 @@
 
 (defn add-semicolons [code]
   ;; TODO: semicolons are added into multiline string literals
-  (str/replace code #"([a-z0-9)}]|[+][+]|--|\")(\n|$)" "$1;\n"))
+  (str/replace code #"([a-z0-9)}]|[+][+]|--)(\n|$)" "$1;\n"))
 
 (defn parse [code]
   (eval
@@ -281,6 +279,9 @@
 
          [:decimal_lit . !x ...]
          (Integer/parseInt (str . !x ...))
+
+         [:binary_lit . !x ...]
+         (Integer/parseInt (str . !x ...) 2)
 
          [:identifier ?x]
          (keyword ?x)
@@ -312,14 +313,26 @@
          [:VarSpec ?vars ?type]
          [:var {:name ?vars, :type ?type}]
 
-         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params] [ :Result [:Parameters ?res]  ] ] [ :FunctionBody ?body ] ]
+         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params] [ :Result [:Parameters ?res] ] ] [ :FunctionBody ?body ] ]
          [:func {:name ?name, :return ?res, :args ?params} ?body]
-         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters] [ :Result [:Parameters ?res]  ] ] [ :FunctionBody ?body ] ]
-         [:func {:name ?name, :return ?res, } ?body]
-         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params]] [ :FunctionBody ?body ] ]
-         [:func {:name ?name, :args ?params} ?body]
-         [:FunctionDecl [:FunctionName ?name] [:Signature [:Parameters ]] [:FunctionBody ?body]]
-         [:func {:name ?name} ?body]
+
+         [:FunctionDecl
+          [:FunctionName ?name ]
+          [:Signature [:Parameters ?params] [ :Result ?type  ] ]
+          [:FunctionBody . !body ... ] ]
+         [:func {:name ?name, :return ?type, :args ?params} . !body ...]
+
+         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters] [ :Result [:Parameters ?res]  ] ] [ :FunctionBody . !body ...] ]
+         [:func {:name ?name, :return ?res, } . !body ...]
+
+         [:FunctionDecl [:FunctionName ?name ] [:Signature [:Parameters ?params]] [ :FunctionBody . !body ... ] ]
+         [:func {:name ?name, :args ?params} . !body ...]
+
+         [:FunctionDecl [:FunctionName ?name] [:Signature [:Parameters ]] [:FunctionBody . !body ...]]
+         [:func {:name ?name} . !body ...]
+
+         [:FunctionDecl [:FunctionName ?name] [:Signature [:Parameters ]] [:FunctionBody . !body ...]]
+         [:func {:name ?name} . !body ...]
 
          [:TypeDef ?name ?type]
          [:type ?name ?type]
@@ -352,15 +365,12 @@
          [:ImportDecl . !items ...]
          [:import . !items ...]
 
-         [:TopLevelDecl ?decl]
-         ?decl
-
          [:FieldDecl ?name ?type]
          [?name ?type]
 
          #_(* Expressions *)
 
-         [:Expression ?left [:binary_op [_ ?op]] ?right]
+         [:Expression ?left [:binary_op ?op] ?right]
          [(keyword ?op) ?left ?right]
 
          [:UnaryExpr [:unary_op ?op] ?x]
@@ -380,11 +390,8 @@
 
          #_(* Statements *)
 
-         [:Block [:StatementList . !stmt ...]]
-         [. !stmt ...] ;; TODO: this returns a list in a list, shuold be just list
-
-         [:Block [. !stmts ...]]
-         [. !stmts ...]
+         [:Block ?items]
+         ?items
 
          [:ShortVarDecl ?var ":=" ?expr]
          [:%= ?var ?expr]
@@ -414,8 +421,19 @@
          [:if ?expr ?body]
 
          [:IfStmt "if" ?assign ";" ?expr ?body]
-         [:if {:%= ?assign
+         [:if {:pre ?assign
                :cond ?expr} ?body]
+
+         [:IfStmt "if" ?assign ";" ?case . !body ... "else" . !else-body ...]
+         [:if {:pre ?assign
+               :cond ?case}
+          [:then . !body ...]
+          [:else . !else-body ...]]
+
+         [:IfStmt "if" ?expr . !body ... "else" . !else-body ...]
+         [:if {:cond ?expr}
+          [:then . !body ...]
+          [:else . !else-body ...]]
 
          [:IncDecStmt ?var ?op]
          [(keyword ?op) ?var]
@@ -435,8 +453,10 @@
          [:RangeClause ?id-list ":=" "range" ?expr]
          {:%= [?id-list [:range ?expr]]}
 
-         [:ForStmt "for" ?for-info ?body]
-         [:for ?for-info ?body]
+         [:ForStmt "for" ?for-info . !body ...]
+         [:for ?for-info . !body ...]
+         [:ForStmt "for"]
+         [:for]
 
          [:KeyedElement [:Key ?key] ":" ?elem]
          [?key ?elem]
@@ -458,8 +478,7 @@
          ?type
 
          [:ReturnStmt ?items]
-         (let [items ?items]
-           (into [] (concat [:return] (if (vector? items) items (vector items)))))
+         [:return ?items]
 
          [:ReturnStmt]
          [:return]
@@ -508,6 +527,7 @@
          (keyword (str . !items ...))
          [:add_op ?op]
          ?op
+
          [:mul_op ?op]
          ?op
 
@@ -550,9 +570,6 @@
          [:switch ?guard
           . !clauses ...]
 
-         [:StatementList . !stmts ...]
-         [. !stmts ...]
-
          [:TypeCaseClause ?type ":" [. !stmts ...]]
          [:case ?type . !stmts ...]
 
@@ -562,15 +579,13 @@
          [:Conversion ?type ?expr]
          [?type ?expr]
 
-         [:func ?props [. !children ...]]
-         [:func ?props . !children ...]
-         [:func [. !children ...]]
-         [:func . !children ...]
+         ;[:func ?props [?child1 . !children ...]]
+         ;[:func ?props ?child1 . !children ...]
+         ;[:func [?child1 . !children ...]]
+         ;[:func ?child1 . !children ...]
 
          [:QualifiedIdent [:PackageName ?pkg-name] "." ?id]
-         (keyword (str (name ?pkg-name) "." (name ?id)))
-
-         ))))
+         (keyword (str (name ?pkg-name) "." (name ?id)))))))
     (golang (add-semicolons code)))
 ))
 
@@ -578,61 +593,51 @@
   (let [type (first (filter identity (map #(-> % second :type) consts)))]
     (into [] (map #(assoc-in % [1 :type] type) consts))))
 
+;; TODO: Semicolons should be added after some strings
+
 (comment
   (parse "package main
-var i, j int = 1, 2
+
+import (
+	\"fmt\"
+	\"math\"
+)
+
+func pow(x, n, lim float64) float64 {
+	if v := math.Pow(x, n); v < lim {
+        v += 10.0
+		return v
+	} else if v > lin{
+        v -= 10.0
+		fmt.Printf(\"%g >= %g\n\", v, lim)
+	} else {
+		v = 10
+    }
+	// can't use v here, though
+	return lim
+}
 
 func main() {
-	var c, python, java = true, false, \"no!\"
-	fmt.Println(i, j, c, python, java)
+	fmt.Println(
+		pow(3, 2, 10),
+		pow(3, 3, 20),
+	)
 }"))
 
 
 (def parsed-data (parse "package main
-/* comment */
-// Another comment
-import (
-    . \"fmt\"
-    \"time\"
-)
 
-var a, b = 10, 20
-
-type Pill int
-
-const (
-    Placebo Pill = iota
-    Aspirin
-    Ibuprofen
-    Paracetamol
-    Acetaminophen = Paracetamol
-)
-
-type Boomer interface {
-	Boom (a int, b int) Card
-}
-
-type Card struct {
-    File
-	Suit string
-	Rank int
-}
-
-type MyInt int
-
-var x = 10
-
-func Funny() int {
-
-}
-"))
+func main() {
+	for {
+	}
+}"))
 
 
 (comment
   (def country-data {"United States" {"iso" "US"}})
 
   (def data (cheshire/parse-string
-             "[{\"4074267\": {\"geonameid\": 4074267, \"name\": \"Madison\", \"latitude\": 34.69926, \"longitude\": -86.74833, \"countrycode\": \"US\", \"population\": 46962, \"timezone\": \"America/Chicago\", \"admin1code\": \"AL\"}}, {\"4434663\": {\"geonameid\": 4434663, \"name\": \"Madison\", \"latitude\": 32.46181, \"longitude\": -90.11536, \"countrycode\": \"US\", \"population\": 25799, \"timezone\": \"Amerca/Chicago\", \"admin1code\": \"MS\"}}, {\"4838116\": {\"geonameid\": 4838116, \"name\": \"Madison\", \"latitude\": 41.27954, \"longitude\": -72.59843, \"countrycode\": \"US\", \"population\": 19100, \"timezone\": \"America/New_York\", \"admin1code\": \"CT\"}}, {\"5100748\": {\"geonameid\": 5100748, \"name\": \"Madison\", \"latitude\": 40.75982, \"longitude\": -74.4171, \"countrycode\": \"US\", \"population\": 16126, \"timezone\": \"America/New_York\", \"admin1code\": \"NJ\"}}, {\"5261457\": {\"geonameid\": 5261457, \"name\": \"Madison\", \"latitude\": 43.07305, \"longitude\": -89.40123, \"countrycode\": \"US\", \"population\": 248951, \"timezone\": \"America/Chicago\", \"admin1code\": \"WI\"}}]"))
+             "[{\"4074267\": {\"geonameid\": 4074267, \"name\": \"Madison\", \"latitude\": 34.69926, \"longitude\": -86.74833, \"countrycode\": \"US\", \"population\": 46962, \"timezone\": \"America/Chicago\", \"admin1code\": \"AL\"}}, {\"4p434663\": {\"geonameid\": 4434663, \"name\": \"Madison\", \"latitude\": 32.46181, \"longitude\": -90.11536, \"countrycode\": \"US\", \"population\": 25799, \"timezone\": \"Amerca/Chicago\", \"admin1code\": \"MS\"}}, {\"4838116\": {\"geonameid\": 4838116, \"name\": \"Madison\", \"latitude\": 41.27954, \"longitude\": -72.59843, \"countrycode\": \"US\", \"population\": 19100, \"timezone\": \"America/New_York\", \"admin1code\": \"CT\"}}, {\"5100748\": {\"geonameid\": 5100748, \"name\": \"Madison\", \"latitude\": 40.75982, \"longitude\": -74.4171, \"countrycode\": \"US\", \"population\": 16126, \"timezone\": \"America/New_York\", \"admin1code\": \"NJ\"}}, {\"5261457\": {\"geonameid\": 5261457, \"name\": \"Madison\", \"latitude\": 43.07305, \"longitude\": -89.40123, \"countrycode\": \"US\", \"population\": 248951, \"timezone\": \"America/Chicago\", \"admin1code\": \"WI\"}}]"))
 
   (m/search {:matches data, :country-data country-data}
     {:matches (m/scan {_ {"name" ?name, "countrycode" ?countrycode}})
